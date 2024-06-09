@@ -245,9 +245,122 @@ app.get('/', (req, res) => {
     res.send({ message: 'hello' });
 });
 
+function findAmongChildren(directory, field, fieldValue) {
+    try{
+        if (directory.type === 'directory') {
+            for (const record of directory.children) {
+                if (record[field] === fieldValue) {
+                    return record;
+                }
+            }
+        }
+        return null;
+    }
+    catch(error)
+    {
+        console.log(error);
+        throw error;
+    }
+}
+
+function insertRecordRecursively(record, directory) {
+    if (record.path === directory.path) {
+        return;
+    }
+
+    const parentPath = record.path.substring(0, record.path.lastIndexOf('\\'));
+    const parentName = record.path.substring(
+        record.path.lastIndexOf('\\', record.path.lastIndexOf('\\') - 1) + 1, 
+        record.path.lastIndexOf('\\')
+    );
+
+    const parentRecord = findRecordByField(directory, "path", parentPath);
+
+    if (parentRecord) {
+        parentRecord.children.push(record);
+    } else {
+        console.log("parent name aalu is : ",parentName);
+        const parentId = uuidv4();
+        const newParentRecord = {
+            id: parentId,
+            jobId: record.jobId,
+            name: parentName,
+            type: "directory",
+            path: parentPath,
+            children: []
+        };
+
+        insertRecordRecursively(newParentRecord, directory);
+
+        newParentRecord.children.push(record);
+    }
+}
+
+
+function insertFileRecordIntoVirtualDirectory(record, virtualDirectory)
+{
+    try{
+        if(!record || !virtualDirectory){
+            throw new Error({
+                message:"invalid parameters to function insertFileRecordIntoVirtualDirectory(record, virtualDirectory)",
+                record,
+                virtualDirectory
+            })
+        }
+        
+        const JobRecord = findAmongChildren(virtualDirectory,'jobId',record.jobId);
+
+        if(JobRecord){
+            insertRecordRecursively(record, JobRecord);
+        }
+        else{
+            throw new Error("Job doesnt exist yet, create a job first");
+        }
+    }
+    catch(error){
+        console.log(error);
+        throw error;
+    }
+}
+
+//upload single endpoint
+app.post("/uploadSingle", upload.single('file'), async (req, res) => {
+    try {
+        const file = req.file;
+        const fileRecord = JSON.parse(req.body.record);//is in plain text format hence must be converted. just how multer works
+        
+        fileRecord.id = uuidv4();
+        fileRecord.links = [];
+        fileRecord.size = file.size;
+        
+        const links = await uploadSingleFileToDiscord('1047921563447590994', file);
+        fileRecord.links = [...links];
+
+        insertFileRecordIntoVirtualDirectory(fileRecord, virtualDirectory);
+
+        res.status(200).json({
+            message: "singular file uploaded successfully",
+            success: true,
+            virtualDirectory: virtualDirectory,
+            fileRecord: fileRecord,
+            file: file    
+        });
+    } catch (error) {
+        console.error("error in /uploadSingular : ", error.message);
+        res.status(500).json({
+            message: "error in /uploadSingular",
+            success: false,
+            error: error
+        });
+    }
+});
+
+
 //upload endpoint
 app.post('/upload', upload.array('files'), async (req, res) => {
     try {
+        console.log('..............................');
+        console.log('Beginning upload Sequence for job ',req.body.directoryStructure.jobId);
         const startTime = Date.now();
         
         const directoryStructure = JSON.parse(req.body.directoryStructure);
@@ -260,7 +373,6 @@ app.post('/upload', upload.array('files'), async (req, res) => {
         const newIndex = virtualDirectory.children.length - 1;
         const searchCheckpoint = virtualDirectory.children[newIndex];
 
-        console.log('before links:', JSON.stringify(virtualDirectory, null, 2));
         for (const file of files) {
             const fileName = file.originalname;
             const fileEntry = findRecordByField(searchCheckpoint, 'name', fileName);
@@ -269,10 +381,10 @@ app.post('/upload', upload.array('files'), async (req, res) => {
                 fileEntry.links.push(...links);
             }
         }
-        console.log('after links:', JSON.stringify(virtualDirectory, null, 2));
 
         const endTime = Date.now();
         const uploadTime = getTimeElapsed(startTime, endTime);
+        
         res.status(200).json({
             message: 'Files uploaded and sent to Discord successfully',
             success: true,
@@ -292,23 +404,28 @@ app.post('/upload', upload.array('files'), async (req, res) => {
 app.post('/retrieve', async (req, res) => {
     try {
         console.log('..............................');
-        console.log('Initiating retrieval sequence');
+        console.log('Beginning Retrieval Sequence for resource ',req.body.identifier);
         const startTime = Date.now();
+        
         const identifier = req.body.identifier;
+        if(!identifier)
+            throw new Error("Identifier missing");
 
         const record = findRecordByField(virtualDirectory, 'id', identifier);
-        if (!record) throw new Error('Record not found in the virtualDirectory');
+        if (!record) 
+            throw new Error('Record not found in the virtualDirectory');
 
         if (record.type === 'file') {
             const retrievedFile = await retrieveSingleFileFromDiscord(record.links);
-            const endTime = Date.now();
-            const retrievalTime = getTimeElapsed(startTime, endTime);
             
             const fileObject = {
                 name: retrievedFile.name,
                 extension: path.extname(retrievedFile.name),
                 buffer: retrievedFile.buffer.toString('base64')
             };
+
+            const endTime = Date.now();
+            const retrievalTime = getTimeElapsed(startTime, endTime);
         
             res.status(200).json({
                 message: 'File retrieved successfully',
@@ -316,10 +433,10 @@ app.post('/retrieve', async (req, res) => {
                 retrievalTime,
                 file: fileObject
             });
-        
+
             console.log('Retrieval sequence complete');
             console.log('..............................');
-        
+
         } else if (record.type === 'directory') {
             const retrievedFiles = await retrieveFilesFromDirectory(record);
             
@@ -360,9 +477,9 @@ app.post('/retrieve', async (req, res) => {
                             buffer: zipBuffer.toString('base64')
                         }
                     });
-                }); // <-- Closing brace for fs.writeFile callback
+                }); 
         
-            }); // <-- Closing brace for archive.on('end')
+            });
         
             archive.on('error', err => { throw err; });
         
@@ -381,8 +498,9 @@ app.post('/retrieve', async (req, res) => {
             
             console.log('Retrieval sequence complete');
             console.log('..............................');
-        } // <-- Closing brace for else if (record.type === 'directory')
+        }
     } catch (error) {
+        console.error(error);
         res.status(500).json({
             message: 'Failed to retrieve record',
             success: false,
@@ -391,7 +509,7 @@ app.post('/retrieve', async (req, res) => {
     }
 });
 
-//to get the virtual directory structure in order to refer to the identifiers
+//to get the virtual directory structure in order to refer to the record identifiers and job identifiers
 app.get('/virtualDirectory', (req, res) => {
     try {
         res.status(200).json({
@@ -400,7 +518,7 @@ app.get('/virtualDirectory', (req, res) => {
             virtualDirectory: virtualDirectory
         });
     } catch (error) {
-        console.error('Failed to retrieve virtual directory structure:', error);
+        console.error(error);
         res.status(500).json({
             message: 'Failed to retrieve virtual directory structure',
             success: false,
