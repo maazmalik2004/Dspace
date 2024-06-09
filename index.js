@@ -228,7 +228,7 @@ async function retrieveSingleFileFromDiscord(links) {
 async function retrieveFilesFromDirectory(directory) {
     const retrievedFiles = [];
     for (const child of directory.children) {
-        if (child.type === 'file') {
+        if (child.type === 'file' && child.links.length != 0) {
             const retrievedFile = await retrieveSingleFileFromDiscord(child.links);
             retrievedFiles.push({ name: child.name, buffer: retrievedFile.buffer, type: 'file' });
         } else if (child.type === 'directory') {
@@ -415,7 +415,7 @@ app.post('/retrieve', async (req, res) => {
         if (!record) 
             throw new Error('Record not found in the virtualDirectory');
 
-        if (record.type === 'file') {
+        if (record.type === 'file' && record.links.length!=0) {
             const retrievedFile = await retrieveSingleFileFromDiscord(record.links);
             
             const fileObject = {
