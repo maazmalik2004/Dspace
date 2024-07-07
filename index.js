@@ -453,7 +453,7 @@ app.post('/retrieve', async (req, res) => {
         
                 // Save zip file to server
                 const zipFileName = `${record.name}.zip`;
-                const zipFilePath = path.join(DIRNAME, zipFileName); 
+                const zipFilePath = path.join(DIRNAME, "downloads/"+zipFileName); 
         
                 fs.writeFile(zipFilePath, zipBuffer, (err) => {
                     if (err) {
