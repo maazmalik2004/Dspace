@@ -1,42 +1,45 @@
 import path from 'path';
 import { Client, GatewayIntentBits } from 'discord.js';
 
+import fs from 'fs';
+
 class DiscordServices {
-    constructor(token, config) {
+    constructor(token, config, client = null, channelObjects = null) {
         this.token = token;
         this.config = config;
 
-        this.client = new Client({ 
+        this.client = client || new Client({ 
             intents: config.intents.map(intent => GatewayIntentBits[intent]),
             rest: { timeout: config.timeout } 
         });
-        
-        //for round robin between channels
+
         this.channelIndex = 0;
-        this.channelObjects = [];
+        this.channelObjects = channelObjects || [];
+    }
+
+    async prefetchChannelObjects() {
+        this.channelObjects = await Promise.all(
+            this.config.channels.map(channelId => this.client.channels.fetch(channelId))
+        );
+        return this.channelObjects;
     }
 
     async login() {
         try {
             this.client.once('ready', () => {
-                console.log(`${this.client.user.tag} has logged in successfully.`);       
+                console.log(`${this.client.user.tag} has logged in successfully.`);
             });
 
             while (!this.client.user) {
                 try {
                     console.log("Attempting to log in...");
                     await this.client.login(this.token);
-
-                    //pre fetching channel objects
-                    this.channelObjects = await Promise.all(this.config.channels.map(async (channelId) => {
-                        return await this.client.channels.fetch(channelId);
-                    })); 
+                    await this.prefetchChannelObjects();
                 } catch (error) {
-                    console.error(`Login failed, retrying in ${backoff}ms...`, error);
+                    console.error(`Login failed, retrying in ${this.config.backoff}ms...`, error);
                 }
                 await new Promise(resolve => setTimeout(resolve, this.config.backoff));
             }
-            console.log("Login successful.");
             return this.client;
         } catch (error) {
             console.error("Unexpected error during login:", error);
@@ -45,171 +48,261 @@ class DiscordServices {
 
     async uploadFile(file) {
         try {
-            console.log("Beginning file upload for ", file.originalname);
-
-            const startTime = new Date();
-
-            const links = [];
+            console.log("Beginning file upload for", file.originalname);
             const chunkSize = this.config.chunkSize * 1024 * 1024;
             const numberOfChunks = Math.ceil(file.buffer.length / chunkSize);
-            
-            const uploadPromises = [];
+            const extension = path.extname(file.originalname);
     
-            for (let i = 0; i < numberOfChunks; i++) {
-                const start = i * chunkSize;
-                const end = Math.min(start + chunkSize, file.buffer.length);
-                const chunkData = file.buffer.slice(start, end);
-                const chunkName = `${this.getUniqueDateTimeLabel()}${path.extname(file.originalname)}.${i}.chunk`;
-                uploadPromises.push(this.uploadChunk({ buffer: chunkData, name: chunkName }));
-            }
+            const uploadPromises = await Promise.all(
+                Array.from({ length: numberOfChunks }, async (_, i) => {
+                    const start = i * chunkSize;
+                    const end = Math.min(start + chunkSize, file.buffer.length);
+                    const chunkData = file.buffer.slice(start, end);
+                    
+                    let chunkName;
+                    if (numberOfChunks === 1) {
+                        chunkName = `${this.getUniqueDateTimeLabel()}${extension}.${i}.atomic`;
+                    } else {
+                        chunkName = `${this.getUniqueDateTimeLabel()}${extension}.${i}.chunk`;
+                    }
     
-            const results = await Promise.all(uploadPromises);
-            console.log("results : ",results);
-            results.forEach(link => links.push(link));
-    
-            console.log("Finished file upload for ", file.originalname);
+                    return this.uploadChunk({ buffer: chunkData, name: chunkName });
+                })
+            );
 
-            const endTime = new Date(); 
-            const elapsedTime = endTime - startTime;
-            console.log(elapsedTime);
-
+            let links = uploadPromises;
+            console.log("Finished file upload for", file.originalname);
             return links;
-    
         } catch (error) {
             console.error("Unexpected error during file upload:", error);
         }
     }
+    
 
-    async uploadChunk(chunk) {
-        while (true) {
-            try {
-                const channel = this.channelObjects[this.channelIndex];
-                this.channelIndex = (this.channelIndex + 1) % this.config.channels.length;
-    
-                const message = await channel.send({
-                    files: [{ attachment: chunk.buffer, name: chunk.name }]
-                });
-    
-                const chunkLink = `https://discord.com/channels/${channel.guild.id}/${channel.id}/${message.id}`;
-                console.log(`Chunk uploaded: ${chunkLink}`);
-                return chunkLink;
-    
-            } catch (error) {
-                console.error("Error during chunk upload. Retrying...", error);
-                await new Promise(resolve => setTimeout(resolve, this.config.backoff));
-            }
-        }
-    }
-    
     /*
     //vestigial code
     async uploadFile(file) {
         try {
-            console.log("Beginning singular file upload sequence for", file.originalname);
-            let links = [];
-            if (file.size < this.config.maxChunkSize * 1024 * 1024) {
-                const timeStamp = this.getUniqueDateTimeLabel();
-                const extension = path.extname(file.originalname);
-                const chunkName = `${timeStamp}${extension}.0.atomic`;
-                links.push(await this.uploadChunk({ buffer: file.buffer, name: chunkName }));
-            } else {
-                const buffer = file.buffer;
-                const chunkSize = this.config.chunkSize * 1024 * 1024;
-                const numberOfChunks = Math.ceil(buffer.length / chunkSize);
+            console.log("Beginning file upload for", file.originalname);
+            const chunkSize = this.config.chunkSize * 1024 * 1024;
+            const numberOfChunks = Math.ceil(file.buffer.length / chunkSize);
+            let extension = path.extname(file.originalname);
+            const uploadPromises = [];
 
-                for (let i = 0; i < numberOfChunks; i++) {
-                    const timeStamp = this.getUniqueDateTimeLabel();
-                    const start = i * chunkSize;
-                    const end = Math.min(start + chunkSize, buffer.length);
-                    const chunkData = buffer.slice(start, end);
-                    const extension = path.extname(file.originalname);
-                    const chunkName = `${timeStamp}${extension}.${i + 1}.chunk`;
-                    links.push(await this.uploadChunk({ buffer: chunkData, name: chunkName }));
+            for (let i = 0; i < numberOfChunks; i++) {
+                const start = i * chunkSize;
+                const end = Math.min(start + chunkSize, file.buffer.length);
+                const chunkData = file.buffer.slice(start, end);
+
+                let chunkName;
+                if (numberOfChunks === 1) {
+                    chunkName = `${this.getUniqueDateTimeLabel()}${extension}.${i}.atomic`;
+                } else {
+                    chunkName = `${this.getUniqueDateTimeLabel()}${extension}.${i}.chunk`;
                 }
+                
+                uploadPromises.push(this.uploadChunk({ buffer: chunkData, name: chunkName }));
             }
-            console.log("Finished singular file upload sequence for", file.originalname);
+
+            const links = await Promise.all(uploadPromises);
+            console.log("Finished file upload for", file.originalname);
             return links;
+
         } catch (error) {
             console.error("Unexpected error during file upload:", error);
         }
     }
     */
 
-    //a local instance for utility and simplicity of imports
-    getUniqueDateTimeLabel() {
-        const date = new Date();
-        const day = String(date.getDate()).padStart(2, '0');
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const year = date.getFullYear();
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        const seconds = String(date.getSeconds()).padStart(2, '0');
-        const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
-        const timezoneOffset = date.getTimezoneOffset();
-        const offsetHours = String(Math.floor(Math.abs(timezoneOffset) / 60)).padStart(2, '0');
-        const offsetMinutes = String(Math.abs(timezoneOffset) % 60).padStart(2, '0');
-        const timezoneSign = timezoneOffset > 0 ? '-' : '+';
-        const timezone = `${timezoneSign}${offsetHours}:${offsetMinutes}`;
-        return `${day}:${month}:${year}:${hours}:${minutes}:${seconds}:${milliseconds}:${timezone}`;
+    async uploadChunk(chunk) {
+        while (true) {
+            try {
+                const channel = this.channelObjects[this.channelIndex];
+                this.channelIndex = (this.channelIndex + 1) % this.config.channels.length;
+
+                const message = await channel.send({
+                    files: [{ attachment: chunk.buffer, name: chunk.name }]
+                });
+
+                const chunkLink = `https://discord.com/channels/${channel.guild.id}/${channel.id}/${message.id}`;
+                console.log(`Chunk uploaded: ${chunkLink}`);
+                return chunkLink;
+            } catch (error) {
+                console.error("Error during chunk upload. Retrying...", error);
+                await new Promise(resolve => setTimeout(resolve, this.config.backoff));
+            }
+        }
     }
+
+    async retrieveFile(links) {
+        try {
+            console.log("Beginning file retrieval");
+            
+            const retrievalPromises = links.map(link => this.retrieveChunk(link));
+            const downloadedChunks = await Promise.all(retrievalPromises);
+            const cumulativeBuffer = Buffer.concat(downloadedChunks.map(chunk => chunk.buffer));
+            const extension = downloadedChunks[0].name.split('.')[1];
+                
+            return {
+                name: `retrieved.${extension}`,
+                extension:extension,
+                buffer: cumulativeBuffer
+            };
+        } catch (error) {
+            console.error("Error during file retrieval:", error);
+            throw new Error('Failed to retrieve file chunks');
+        }
+    }
+    
+    async retrieveChunk(link) {
+        console.log("Retrieving", link);
+        const regex = /https:\/\/discord\.com\/channels\/(\d+)\/(\d+)\/(\d+)/;
+        const match = link.match(regex);
+
+        if (!match) {
+            throw new Error('Invalid Discord link');
+        }
+
+        const [, guildId, channelId, messageId] = match;
+        const channel = this.channelObjects[this.config.channels.indexOf(channelId)];
+
+        while (true) {
+            try {
+                const message = await channel.messages.fetch(messageId);
+                const attachment = message.attachments.first();
+
+                if (!attachment) {
+                    throw new Error('No attachment found in the message');
+                }
+
+                const response = await fetch(attachment.url);
+                const buffer = Buffer.from(await response.arrayBuffer());
+
+                return {
+                    name: attachment.name,
+                    buffer: buffer
+                };
+            } catch (error) {
+                console.error(`Error retrieving chunk: ${error.message}`);
+                await new Promise(resolve => setTimeout(resolve, this.config.backoff));
+            }
+        }
+    }  
+    
+    getUniqueDateTimeLabel() {
+        return Date.now();
+    } 
+}
+/*
+// Function to create a file from a buffer and save it at a specified location
+async function createFile(buffer, filePath) {
+    return new Promise((resolve, reject) => {
+        fs.writeFile(filePath, buffer, (err) => {
+            if (err) {
+                return reject(err);
+            }
+            console.log(`File saved successfully at ${filePath}`);
+            resolve();
+        });
+    });
 }
 
-//test code
+// Function to read a file from the specified path
+async function readFileBuffer(filePath) {
+    return new Promise((resolve, reject) => {
+        fs.readFile(filePath, (err, data) => {
+            if (err) {
+                return reject(err);
+            }
+            resolve(data);
+        });
+    });
+}
 
-const config = {
-    intents: [
-        "Guilds",
-        "GuildMessages",
-        "MessageContent"
-    ],
-    restVersion: 10,
-    timeout: 50000,
-    backoff: 1000,
-    exponentialBackoffCoefficient: 1.5,
-    attempts: 100,
-    chunkSize: 5,
-    maxChunkSizeAllowed: 24,
-    channels: [
-        "1047921563447590994",
-        "1047922054831284255",
-        "1047921640840908910",
-        "1047921823179874324",
-        "1047921706972487721",
-        "1047921950871265281"
-    ]
-};
+async function test(filePath) {
+    let token = "";
 
-async function simulateUserUpload(userId) {
-    const discordService = new DiscordServices(token, config);
-
-    await discordService.login();
-
-    const simulatedFileName = `simulatedFile_user${userId}.txt`;
-
-    const simulatedFileSizeMB = 1000;
-    const fileBuffer = Buffer.alloc(simulatedFileSizeMB * 1024 * 1024, 'A'); 
-
-    const file = {
-        originalname: simulatedFileName, 
-        buffer: fileBuffer,
-        size: fileBuffer.length
+    const config = {
+        intents: [
+            "Guilds",
+            "GuildMessages",
+            "MessageContent"
+        ],
+        restVersion: 10,
+        timeout: 50000,
+        backoff: 1000,
+        exponentialBackoffCoefficient: 1.5,
+        attempts: 100,
+        chunkSize: 8,
+        maxChunkSizeAllowed: 24,
+        channels: [
+            "1047921563447590994",
+            "1047922054831284255",
+            "1047921640840908910",
+            "1047921823179874324",
+            "1047921706972487721",
+            "1047921950871265281"
+        ]
     };
 
-    const links = await discordService.uploadFile(file);
-    console.log(`Uploaded file links for user ${userId}:`, links);
-}
+    async function simulateUserUploadIndividualInstance(userId) {
+        const discordService = new DiscordServices(token, config);
+        await discordService.login(); // Login for each instance
+        await discordService.prefetchChannelObjects();
 
-(async () => {
-    const userUploadPromises = [];
+        // Read the file buffer from the specified file path
+        const fileBuffer = await readFileBuffer(filePath);
+        const simulatedFileName = path.basename(filePath); // Use the actual file name
 
-    for (let i = 1; i <= 1; i++) {
-        userUploadPromises.push(simulateUserUpload(i));
+        const file = {
+            originalname: simulatedFileName,
+            buffer: fileBuffer,
+            size: fileBuffer.length
+        };
+
+        const uploadStartTime = Date.now(); // Start time for upload
+        const links = await discordService.uploadFile(file);
+        const uploadEndTime = Date.now(); // End time for upload
+
+        console.log(`Uploaded file links for user ${userId}:`, links);
+
+        // Simulate file retrieval after upload
+        try {
+            const retrievalStartTime = Date.now(); // Start time for retrieval
+            const retrievedFile = await discordService.retrieveFile(links);
+            const retrievalEndTime = Date.now(); // End time for retrieval
+
+            const uploadTime = uploadEndTime - uploadStartTime; // Calculate upload time
+            const retrievalTime = retrievalEndTime - retrievalStartTime; // Calculate retrieval time
+            
+            console.log(`Retrieved file for user ${userId}:`, retrievedFile.name);
+            console.log(`User ${userId} - Upload Time: ${uploadTime} ms, Retrieval Time: ${retrievalTime} ms`);
+
+            // Save the retrieved buffer to a specified file path
+            const outputPath = "C:\\Users\\MI\\Downloads\\meow.mp4" // Specify your path here
+            await createFile(retrievedFile.buffer, outputPath); // Save retrieved buffer to file
+        } catch (error) {
+            console.error(`Error retrieving file for user ${userId}:`, error);
+        }
     }
 
-    await Promise.all(userUploadPromises);
+    const startIndividualInstance = Date.now();
 
-    console.log("All users have completed their uploads.");
-})();
-//end of test code
+    const userUploadPromisesIndividual = [];
+    for (let i = 1; i <= 10; i++) { // Simulate uploads for 1 user (you can increase this to simulate more)
+        userUploadPromisesIndividual.push(simulateUserUploadIndividualInstance(i));
+    }
+    await Promise.all(userUploadPromisesIndividual);
+
+    const endIndividualInstance = Date.now();
+    const elapsedIndividualInstance = endIndividualInstance - startIndividualInstance;
+
+    console.log(`All users completed uploads and retrievals (Individual Instances) in ${elapsedIndividualInstance} ms.`);
+}
+
+const filePathToUpload = "C:\\\Users\\\MI\\\Downloads\\aalu.mp4";
+
+test(filePathToUpload).catch(console.error);
+*/
 
 export default DiscordServices;
