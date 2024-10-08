@@ -8,4 +8,4 @@ console.log(path.basename(p));
 console.log(path.dirname(p));
 */
 
-createUser("testuser3","testuser3@gmail.com","testuser3");
+createUser("testuser","testuser@gmail.com","testuser");

@@ -20,5 +20,8 @@
         "attempts": 100,
         "chunkSize": 15,
         "maxChunkSizeAllowed": 24
+    },
+    "mongodb":{
+        "url":"mongodb://localhost:27017/dspace"
     }
 }

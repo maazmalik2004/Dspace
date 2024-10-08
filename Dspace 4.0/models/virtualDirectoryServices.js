@@ -1,17 +1,19 @@
 import mongoose from "mongoose";
 import { userSchema } from "./schemas.js";
+import { getConfiguration } from "../configuration/configuration.js";
+
+import logger from "../logger/logger.js";
 
 const User = mongoose.model('User', userSchema);
 
 const connect = async () => {
     try {
-        await mongoose.connect("mongodb://localhost:27017/dspace", {
-            useNewUrlParser: true,
-            useUnifiedTopology: true
-        });
-        console.log("MongoDB connected!");
+        const configuration = await getConfiguration();
+        const url = configuration.mongodb.url;
+        await mongoose.connect(url);
+        logger.log(`MongoDB connected at ${url}`);
     } catch (error) {
-        console.error("MongoDB connection error:", error);
+        logger.error("MongoDB connection error", error);
     }
 };
 
@@ -28,13 +30,14 @@ const getUserDetails = async (identifier) => {
         });
 
         if (user) {
+            logger.debug(`User ${identifier} found`, user);
             return user;
         } else {
-            console.log("User not found");
+            logger.warn(`User ${identifier} not found`);
             return null;
         }
     } catch (error) {
-        console.error("Error fetching user details:", error);
+        logger.error(`Error fetching user details for ${identifier}`, error);
         return null;
     }
 };
@@ -50,17 +53,17 @@ const updateUserDetails = async (identifier, field, value) => {
         });
 
         if (!user) {
-            console.log("User not found");
+            logger.warn(`User ${identifier} not found for update`);
             return null;
         }
 
         user[field] = value;
         await user.save();
 
-        console.log(`User's ${field} updated to:`, user[field]);
+        logger.log(`User ${identifier}'s ${field} updated to ${user[field]}`);
         return user; 
     } catch (error) {
-        console.error("Error updating user details:", error);
+        logger.error(`Error updating user details for ${identifier}`, error);
         return null;
     }
 };
@@ -76,14 +79,14 @@ const deleteUser = async (identifier) => {
         });
 
         if (result.deletedCount > 0) {
-            console.log("User deleted successfully.");
+            logger.log(`User ${identifier} deleted successfully`);
             return true;
         } else {
-            console.log("User not found.");
+            logger.warn(`User ${identifier} not found for deletion`);
             return false;
         }
     } catch (error) {
-        console.error("Error deleting user:", error);
+        logger.error(`Error deleting user ${identifier}`, error);
         return false;
     }
 };
@@ -97,9 +100,9 @@ const createUser = async (username, email, password) => {
         });
 
         await user.save();
-        console.log("User created:", user);
+        logger.log("User created", user);
     } catch (error) {
-        console.error("Error creating user:", error);
+        logger.error("Error creating user", error);
     }
 };
 
@@ -114,13 +117,14 @@ const getUserVirtualDirectory = async (identifier) => {
         });
 
         if (user) {
+            logger.debug(`Fetched virtual directory for user ${identifier}`);
             return user.virtualDirectory;
         } else {
-            console.log("User not found");
+            logger.warn(`User ${identifier} not found when fetching virtual directory`);
             return null;
         }
     } catch (error) {
-        console.error("Error fetching user's virtual directory:", error);
+        logger.error(`Error fetching user's virtual directory for ${identifier}`, error);
         return null;
     }
 };
@@ -136,17 +140,17 @@ const setUserVirtualDirectory = async (identifier, updatedVirtualDirectory) => {
         });
 
         if (!user) {
-            console.log("User not found");
+            logger.warn(`User ${identifier} not found when updating virtual directory`);
             return null;
         }
 
         user.virtualDirectory = updatedVirtualDirectory;
         await user.save();
 
-        console.log("User's virtual directory updated:", user.virtualDirectory);
+        logger.log(`User ${identifier}'s virtual directory updated`);
         return user;
     } catch (error) {
-        console.error("Error updating user's virtual directory:", error);
+        logger.error(`Error updating user's virtual directory for ${identifier}`, error);
         return null;
     }
 };
@@ -162,7 +166,7 @@ const searchRecordInVirtualDirectory = async (identifier, field, value) => {
         });
 
         if (!user) {
-            console.log("User not found");
+            logger.warn(`User ${identifier} not found when searching virtual directory`);
             return null;
         }
 
@@ -185,16 +189,25 @@ const searchRecordInVirtualDirectory = async (identifier, field, value) => {
         const foundRecord = findRecord(user.virtualDirectory.children);
 
         if (foundRecord) {
-            console.log("Record found:", foundRecord);
+            logger.log(`Record found in virtual directory for ${identifier}`, foundRecord);
             return foundRecord;
         } else {
-            console.log("Record not found");
+            logger.debug(`Record not found in virtual directory for ${identifier}`);
             return null;
         }
     } catch (error) {
-        console.error("Error searching record in virtual directory:", error);
+        logger.error(`Error searching record in virtual directory for ${identifier}`, error);
         return null;
     }
 };
 
-export {getUserVirtualDirectory, setUserVirtualDirectory, searchRecordInVirtualDirectory, createUser};
+export {
+    getUserVirtualDirectory,
+    setUserVirtualDirectory,
+    searchRecordInVirtualDirectory,
+    createUser,
+    connect,
+    getUserDetails,
+    updateUserDetails,
+    deleteUser
+};

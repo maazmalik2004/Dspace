@@ -1,6 +1,8 @@
 import { v4 as uuid } from "uuid";
 import path from "path";
 
+import logger from "../logger/logger.js";
+
 async function assignIDRecursive(record) {
     try {
         record.id = uuid();
@@ -10,7 +12,7 @@ async function assignIDRecursive(record) {
             await Promise.all(promises);
         }
     } catch (error) {
-        console.error("Error in assignIDRecursive:", error);
+        logger.error("Error in assignIDRecursive()", error);
     }
 }
 
@@ -28,7 +30,7 @@ async function findRecordByField(record, key, value) {
         
         return null;
     } catch (error) {
-        console.error("Error in findRecordByField:", error);
+        logger.error("Error in findRecordByField()", error);
     }
 }
 
@@ -77,7 +79,7 @@ async function insertRecordRecursivelyBasedOnFilePath(record, directory) {
             newParentRecord.children.push(record);
         }
     } catch (error) {
-        console.error("Error in insertRecordRecursivelyBasedOnFilePath:", error);
+        logger.error("Error in insertRecordRecursivelyBasedOnFilePath()", error);
     }
 }
 

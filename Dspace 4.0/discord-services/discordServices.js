@@ -1,8 +1,7 @@
 import path from 'path';
 import { Client, GatewayIntentBits } from 'discord.js';
-
-//tmp: for testing purposes
 import fs from 'fs';
+import logger from "../logger/logger.js";
 
 class DiscordServices {
     constructor(token, config, client = null, channelObjects = null) {
@@ -19,37 +18,42 @@ class DiscordServices {
     }
 
     async prefetchChannelObjects() {
-        this.channelObjects = await Promise.all(
-            this.config.channels.map(channelId => this.client.channels.fetch(channelId))
-        );
-        return this.channelObjects;
+        try {
+            this.channelObjects = await Promise.all(
+                this.config.channels.map(channelId => this.client.channels.fetch(channelId))
+            );
+            logger.log("Channel objects prefetched successfully.");
+            return this.channelObjects;
+        } catch (error) {
+            logger.error("Error prefetched channel objects", error);
+        }
     }
 
     async login() {
         try {
             this.client.once('ready', () => {
-                console.log(`${this.client.user.tag} has logged in successfully.`);
+                logger.log(`${this.client.user.tag} has logged in successfully.`);
             });
 
             while (!this.client.user) {
                 try {
-                    console.log("Attempting to log in...");
+                    logger.log("Attempting to log in...");
                     await this.client.login(this.token);
                     await this.prefetchChannelObjects();
                 } catch (error) {
-                    console.error(`Login failed, retrying in ${this.config.backoff}ms...`, error);
+                    logger.error(`Login failed, retrying in ${this.config.backoff}ms...`, error);
                 }
                 await new Promise(resolve => setTimeout(resolve, this.config.backoff));
             }
             return this.client;
         } catch (error) {
-            console.error("Unexpected error during login:", error);
+            logger.error("Unexpected error during login:", error);
         }
     }
 
     async uploadFile(file) {
         try {
-            console.log("Beginning file upload for", file.originalname);
+            logger.log("Beginning file upload for", file.originalname);
             const chunkSize = this.config.chunkSize * 1024 * 1024;
             const numberOfChunks = Math.ceil(file.buffer.length / chunkSize);
             const extension = path.extname(file.originalname);
@@ -71,49 +75,12 @@ class DiscordServices {
                 })
             );
 
-            let links = uploadPromises;
-            console.log("Finished file upload for", file.originalname);
-            return links;
+            logger.log("Finished file upload for", file.originalname);
+            return uploadPromises;
         } catch (error) {
-            console.error("Unexpected error during file upload:", error);
+            logger.error("Unexpected error during file upload:", error);
         }
     }
-    
-
-    /*
-    //vestigial code
-    async uploadFile(file) {
-        try {
-            console.log("Beginning file upload for", file.originalname);
-            const chunkSize = this.config.chunkSize * 1024 * 1024;
-            const numberOfChunks = Math.ceil(file.buffer.length / chunkSize);
-            let extension = path.extname(file.originalname);
-            const uploadPromises = [];
-
-            for (let i = 0; i < numberOfChunks; i++) {
-                const start = i * chunkSize;
-                const end = Math.min(start + chunkSize, file.buffer.length);
-                const chunkData = file.buffer.slice(start, end);
-
-                let chunkName;
-                if (numberOfChunks === 1) {
-                    chunkName = `${this.getUniqueDateTimeLabel()}${extension}.${i}.atomic`;
-                } else {
-                    chunkName = `${this.getUniqueDateTimeLabel()}${extension}.${i}.chunk`;
-                }
-                
-                uploadPromises.push(this.uploadChunk({ buffer: chunkData, name: chunkName }));
-            }
-
-            const links = await Promise.all(uploadPromises);
-            console.log("Finished file upload for", file.originalname);
-            return links;
-
-        } catch (error) {
-            console.error("Unexpected error during file upload:", error);
-        }
-    }
-    */
 
     async uploadChunk(chunk) {
         while (true) {
@@ -126,10 +93,10 @@ class DiscordServices {
                 });
 
                 const chunkLink = `https://discord.com/channels/${channel.guild.id}/${channel.id}/${message.id}`;
-                console.log(`Chunk uploaded: ${chunkLink}`);
+                logger.log(`Chunk uploaded: ${chunkLink}`);
                 return chunkLink;
             } catch (error) {
-                console.error("Error during chunk upload. Retrying...", error);
+                logger.error("Error during chunk upload. Retrying...", error);
                 await new Promise(resolve => setTimeout(resolve, this.config.backoff));
             }
         }
@@ -137,30 +104,32 @@ class DiscordServices {
 
     async retrieveFile(links) {
         try {
-            console.log("Beginning file retrieval");
+            logger.log("Beginning file retrieval");
             
             const retrievalPromises = links.map(link => this.retrieveChunk(link));
             const downloadedChunks = await Promise.all(retrievalPromises);
             const cumulativeBuffer = Buffer.concat(downloadedChunks.map(chunk => chunk.buffer));
             const extension = downloadedChunks[0].name.split('.')[1];
                 
+            logger.log("File retrieval completed successfully.");
             return {
                 name: `retrieved.${extension}`,
-                extension:extension,
+                extension: extension,
                 buffer: cumulativeBuffer
             };
         } catch (error) {
-            console.error("Error during file retrieval:", error);
+            logger.error("Error during file retrieval:", error);
             throw new Error('Failed to retrieve file chunks');
         }
     }
     
     async retrieveChunk(link) {
-        console.log("Retrieving", link);
+        logger.log("Retrieving", link);
         const regex = /https:\/\/discord\.com\/channels\/(\d+)\/(\d+)\/(\d+)/;
         const match = link.match(regex);
 
         if (!match) {
+            logger.warn('Invalid Discord link:', link);
             throw new Error('Invalid Discord link');
         }
 
@@ -173,18 +142,20 @@ class DiscordServices {
                 const attachment = message.attachments.first();
 
                 if (!attachment) {
+                    logger.warn('No attachment found in the message for link:', link);
                     throw new Error('No attachment found in the message');
                 }
 
                 const response = await fetch(attachment.url);
                 const buffer = Buffer.from(await response.arrayBuffer());
 
+                logger.log("Chunk retrieved successfully:", attachment.name);
                 return {
                     name: attachment.name,
                     buffer: buffer
                 };
             } catch (error) {
-                console.error(`Error retrieving chunk: ${error.message}`);
+                logger.error(`Error retrieving chunk: ${error.message}`, error);
                 await new Promise(resolve => setTimeout(resolve, this.config.backoff));
             }
         }

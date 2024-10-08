@@ -2,6 +2,8 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 
+import logger from "../logger/logger.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function getConfiguration() {
@@ -10,7 +12,7 @@ async function getConfiguration() {
         const data = JSON.parse(await fs.readFile(configurationPath, { encoding: "utf-8" }));
         return data
     } catch (error) {
-        console.error("Error in getConfiguration() ", error);
+        logger.error("Error in getConfiguration()", error);
     }
 }
 

@@ -5,6 +5,8 @@ import dotenv from "dotenv";
 
 import { getConfiguration } from "./configuration/configuration.js";
 
+import logger from "./logger/logger.js";
+
 dotenv.config();
 
 const app = express();
@@ -20,9 +22,9 @@ app.use("/", routes);
         const config = await getConfiguration();
         const PORT = config.port || 8000;
         app.listen(PORT, () => {
-            console.log(`Server is listening on port ${PORT}`);
+            logger.log(`Server is listening on port ${PORT}`);
         });
     } catch (error) {
-        console.error("Failed to start server:", error);
+        logger.error("Failed to start server",error);
     }
 })();

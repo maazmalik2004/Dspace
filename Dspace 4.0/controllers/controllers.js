@@ -2,10 +2,13 @@ import { assignIDRecursive, findRecordByField, insertRecordRecursivelyBasedOnFil
 import { getUserVirtualDirectory, setUserVirtualDirectory, searchRecordInVirtualDirectory } from "../models/virtualDirectoryServices.js";
 import DiscordServices from "../discord-services/discordServices.js";
 import { getConfiguration } from "../configuration/configuration.js";
+import logger from "../logger/logger.js";
+import mime from "mime";
+import archiver from "archiver";
 
 //we will pre login and prefetch so that we dont have to login for every upload job.
 let configuration, client, channelObjects;
-let username = "testuser3";
+let username = "testuser";
 
 (async () => {
     try{
@@ -21,7 +24,7 @@ let username = "testuser3";
 
 async function handleUpload(req, res) {
     try {
-        console.log(`${username} : starting upload sequence`);
+        logger.log(`${username} : starting upload sequence`);
         const directoryStructure = JSON.parse(req.body.directoryStructure); 
         //will be an array of multer objects
         const files = req.files;
@@ -70,7 +73,7 @@ async function handleRoot(req, res) {
             success: true 
         });
     } catch (error) {
-        console.error("Error in root endpoint:", error);
+        logger.error("Error in handleRoot()", error);
         return res.status(500).json({ 
             message: "Internal server error" ,
             success:false, 
@@ -79,4 +82,91 @@ async function handleRoot(req, res) {
     }
 }
 
-export { handleRoot, handleUpload };
+async function handleRetrieval(req, res) {
+    try {
+        logger.log(`${username} : starting retrieval sequence`);
+        
+        const { identifier } = req.params;
+        if (!identifier) throw new Error("Identifier missing");
+        console.log(identifier);
+
+        const userDirectory = await getUserVirtualDirectory(username);
+        const record = await findRecordByField(userDirectory, "id", identifier);
+        if (!record) throw new Error("Record not found");
+        console.log(record);
+
+        const discordService = new DiscordServices(process.env.DSPACE_TOKEN, configuration.discord, client, channelObjects);
+
+        if (record.type == "file") {
+            const retrievedFile = await discordService.retrieveFile(record.links);
+            const mimeType = mime.getType(retrievedFile.extension);
+            res.setHeader('Content-Disposition', `attachment; filename="${record.name}.${retrievedFile.extension}"`);
+            res.setHeader('Content-Type', mimeType);
+            res.send(retrievedFile.buffer);
+        
+        } else if (record.type == "directory") {
+            // Handle directory retrieval
+            console.log("inside directory handler");
+            const retrievedFilesArray = await createFilesArray(record, discordService);
+            console.log(retrievedFilesArray);
+            await createAndSendZip(res, retrievedFilesArray, record.name);
+        } else {
+            throw new Error("Invalid record type. Allowed types are 'file' or 'folder'.");
+        }
+
+    } catch (error) {
+        logger.error("Error in handleRetrieval()", error);
+        return res.status(500).json({
+            message: "Could not retrieve file",
+            success: false,
+            error: error.message // Provide a more user-friendly error message
+        });
+    }
+}
+
+async function createFilesArray(record, discordService, basePath = '', files = []) {
+    const currentPath = basePath ? `${basePath}/${record.name}` : record.name;
+
+    if (record.type === "file") {
+        const retrievedFile = await discordService.retrieveFile(record.links);
+        files.push({
+            name: record.name,
+            buffer: retrievedFile.buffer,
+            path: currentPath 
+        });
+    } else if (record.type === "directory" && record.children) {
+        const retrievalPromises = record.children.map(child =>
+            createFilesArray(child, discordService, currentPath, files) 
+        );
+
+        await Promise.all(retrievalPromises);
+    }
+    
+    return files;
+}
+
+
+
+async function createAndSendZip(res, files, zipFileName) {
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    // Set headers for the response
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipFileName}.zip"`);
+    res.setHeader('Transfer-Encoding', 'chunked'); 
+
+    archive.pipe(res);
+
+    archive.on('error', (err) => {
+        console.error('Archiver error:', err);
+        res.status(500).send('Internal server error');
+    });
+
+    for (const file of files) {
+        archive.append(file.buffer, { name: file.path });
+    }
+
+    await archive.finalize();
+}
+
+export { handleRoot, handleUpload, handleRetrieval };
