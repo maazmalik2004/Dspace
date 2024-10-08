@@ -18,7 +18,7 @@ async function assignIDRecursive(record) {
 
 async function findRecordByField(record, key, value) {
     try {
-        if (record[key] === value) {
+        if (record[key] == value) {
             return record;
         }
         
@@ -57,7 +57,7 @@ async function findRecordByField(record, key, value) {
 
 async function insertRecordRecursivelyBasedOnFilePath(record, directory) {
     try {
-        if (record.path === directory.path) {
+        if (record.path == directory.path) {
             return;
         }
 

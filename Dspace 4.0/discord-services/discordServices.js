@@ -1,6 +1,5 @@
 import path from 'path';
 import { Client, GatewayIntentBits } from 'discord.js';
-import fs from 'fs';
 import logger from "../logger/logger.js";
 
 class DiscordServices {
@@ -25,7 +24,7 @@ class DiscordServices {
             logger.log("Channel objects prefetched successfully.");
             return this.channelObjects;
         } catch (error) {
-            logger.error("Error prefetched channel objects", error);
+            logger.error("Error in prefetchChannelObjects()", error);
         }
     }
 
@@ -47,7 +46,7 @@ class DiscordServices {
             }
             return this.client;
         } catch (error) {
-            logger.error("Unexpected error during login:", error);
+            logger.error("Unexpected error during DiscordServices.login()", error);
         }
     }
 

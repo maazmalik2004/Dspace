@@ -18,7 +18,7 @@
         "backoff": 1000,
         "exponentialBackoffCoefficient": 1.5,
         "attempts": 100,
-        "chunkSize": 15,
+        "chunkSize": 8,
         "maxChunkSizeAllowed": 24
     },
     "mongodb":{

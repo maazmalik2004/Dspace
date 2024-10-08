@@ -20,7 +20,7 @@ app.use("/", routes);
 (async () => {
     try {
         const config = await getConfiguration();
-        const PORT = config.port || 8000;
+        const PORT = config.port || 3000;
         app.listen(PORT, () => {
             logger.log(`Server is listening on port ${PORT}`);
         });
