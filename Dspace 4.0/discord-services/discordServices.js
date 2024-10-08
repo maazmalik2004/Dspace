@@ -1,6 +1,7 @@
 import path from 'path';
 import { Client, GatewayIntentBits } from 'discord.js';
 
+//tmp: for testing purposes
 import fs from 'fs';
 
 class DiscordServices {
@@ -193,6 +194,7 @@ class DiscordServices {
         return Date.now();
     } 
 }
+
 /*
 // Function to create a file from a buffer and save it at a specified location
 async function createFile(buffer, filePath) {

@@ -1,0 +1,24 @@
+{
+    "port": 5000,
+    "discord": {
+        "intents": [
+            "Guilds",
+            "GuildMessages",
+            "MessageContent"
+        ],
+        "channels": [
+            "1047921563447590994",
+            "1047922054831284255",
+            "1047921640840908910",
+            "1047921823179874324",
+            "1047921706972487721",
+            "1047921950871265281"
+        ],
+        "timeout": 50000,
+        "backoff": 1000,
+        "exponentialBackoffCoefficient": 1.5,
+        "attempts": 100,
+        "chunkSize": 15,
+        "maxChunkSizeAllowed": 24
+    }
+}
