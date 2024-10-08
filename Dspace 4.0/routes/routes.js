@@ -1,6 +1,6 @@
 import express from "express";
 import upload from "../middlewares/multer.js";
-import { handleRetrieval, handleRoot, handleUpload } from "../controllers/controllers.js";
+import { handleRetrieval, handleRoot, handleUpload, handleDelete,handleGetUserDirectory } from "../controllers/controllers.js";
 
 const router = express.Router();
 
@@ -8,5 +8,7 @@ const router = express.Router();
 router.get("/", handleRoot);
 router.post("/upload", upload.array("files"), handleUpload);
 router.get("/retrieve/:identifier", handleRetrieval);
+router.delete("/delete/:identifier", handleDelete);
+router.get("/directory/:identifier", handleGetUserDirectory);
 
 export default router;

@@ -185,4 +185,85 @@ async function handleRetrieval(req, res) {
     }
 }
 
-export { handleRoot, handleUpload, handleRetrieval };
+async function handleDelete(req, res) {
+    try {
+        const { identifier } = req.params;
+        logger.log(`${username} deleting ${identifier}`);
+        const userDirectory = await getUserVirtualDirectory(username);
+
+        function deleteById(id, virtualDirectory) {
+            if (virtualDirectory.children) {
+                const index = virtualDirectory.children.findIndex(child => child.id === id);
+                if (index !== -1) {
+                    virtualDirectory.children.splice(index, 1);
+                    return true;
+                } else {
+                    for (const child of virtualDirectory.children) {
+                        if (deleteById(id, child)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        const isDeleted = deleteById(identifier, userDirectory);
+
+        if (!isDeleted) {
+            return res.status(200).json({
+                message: "Record not found, but deletion is considered successful",
+                success: true
+            });
+        }
+
+        await setUserVirtualDirectory(username, userDirectory);
+        logger.log("Resource deleted successfully");
+
+        res.status(200).json({
+            message: 'Resource deleted successfully',
+            success: true,
+            userDirectory: userDirectory
+        });
+
+    } catch (error) {
+        logger.error("Error in handleDelete()", error);
+        res.status(500).json({
+            message: "Internal server error",
+            success: false,
+            error: error.message
+        });
+    }
+}
+
+async function handleGetUserDirectory(req, res) {
+    try {
+        const { identifier } = req.params;
+        logger.log(`${username} fetching virtual directory for ${identifier}`);
+
+        const userDirectory = await getUserVirtualDirectory(identifier);
+
+        if (!userDirectory) {
+            return res.status(404).json({
+                message: 'User directory not found',
+                success: false
+            });
+        }
+
+        res.status(200).json({
+            message: 'User directory fetched successfully',
+            success: true,
+            userDirectory: userDirectory
+        });
+    } catch (error) {
+        logger.error(`Error fetching user directory for ${identifier}`, error);
+        res.status(500).json({
+            message: "Internal server error",
+            success: false,
+            error: error.message
+        });
+    }
+}
+
+
+export { handleRoot, handleUpload, handleRetrieval, handleDelete, handleGetUserDirectory};
