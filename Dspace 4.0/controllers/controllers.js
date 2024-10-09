@@ -54,7 +54,7 @@ async function handleUpload(req, res) {
         //console.log(`${username} : files received ${directoryStructure}`);
 
         //we can save time here by assigning the id's at the client code itself during the generation of the directory structure
-        await assignIDRecursive(directoryStructure);
+        //await assignIDRecursive(directoryStructure);
 
         const uploadPromises = files.map(async (file) => {
             //inconsistency : if two file names are same at the same file path, findRecordByField() will return the first found record
