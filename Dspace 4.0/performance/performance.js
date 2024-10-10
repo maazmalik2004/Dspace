@@ -10,17 +10,17 @@ class Performance {
 
     end() {
         if (this.startTime === null) {
-            throw new Error('Performance has not been started. Please call start() first.');
+            throw new Error('Performance has not been started. Please call start() first');
         }
         this.endTime = Date.now();
     }
 
     elapsed() {
         if (this.startTime === null) {
-            throw new Error('Performance has not been started. Please call start() first.');
+            throw new Error('Performance has not been started. Please call start() first');
         }
         if (this.endTime === null) {
-            throw new Error('Performance has not been ended. Please call end() first.');
+            throw new Error('Performance has not been ended. Please call end() first');
         }
         return this.endTime - this.startTime;
     }

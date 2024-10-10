@@ -9,6 +9,8 @@ import Performance from "../performance/performance.js";
 
 //we will pre login and prefetch so that we dont have to login for every upload and retrieval job.
 let configuration, client, channelObjects;
+
+//tmp
 let username = "testuser";
 
 (async () => {
@@ -18,23 +20,52 @@ let username = "testuser";
         client = await discordServices.login();
         channelObjects = await discordServices.prefetchChannelObjects();
     }catch(error){
-        console.error("Error in top level of controller.js",error);
-        throw error;
+        logger.error("Error in top level of ./controllers/controllers.js",error);
     }
 })();
 
 async function handleRoot(req, res) {
     try {
-        return res.status(200).json({ 
-            message: "Root endpoint hit", 
-            success: true 
+        return res.status(200).json({
+            message: "Welcome to Dspace",
+            success: true,
+            version: "4.0",
+            requiredHeaders:{
+                //empty for now
+            },
+            api: {
+                upload: {
+                    route: "/upload",
+                    method: "POST",
+                    bodyType: "form-data",
+                    fields: {
+                        files: "array of files",
+                        directoryStructure: "A valid directory structure format corresponding to the hierarchical organization of files"
+                    },
+                    description: "Endpoint for uploading resources to remote storage."
+                },
+                retrieve: {
+                    route: "/retrieve/{resource_identifier}",
+                    method: "GET",
+                    description: "Retrieve a resource using its unique resource identifier (UUID)."
+                },
+                delete: {
+                    route: "/delete/{resource_identifier}",
+                    method: "DELETE",
+                    description: "Delete a resource from the user's virtual directory."
+                },
+                getUserDirectory: {
+                    route: "/directory",
+                    method: "GET",
+                    description: "Retrieve the virtual directory structure"
+                }
+            }
         });
     } catch (error) {
         logger.error("Error in handleRoot()", error);
         return res.status(500).json({ 
-            message: "Internal server error" ,
+            message: "Internal server error",
             success:false, 
-            error:error
         });
     }
 }
@@ -42,7 +73,7 @@ async function handleRoot(req, res) {
 //assumption all file names are unique (will be ensured by the client code)
 async function handleUpload(req, res) {
     try {
-        logger.log(`${username} : starting upload sequence`);
+        logger.log("Starting upload sequence",username);
         
         const performance = new Performance();
         performance.start();
@@ -50,8 +81,6 @@ async function handleUpload(req, res) {
         const directoryStructure = JSON.parse(req.body.directoryStructure); 
         //will be an array of multer objects
         const files = req.files;
-        //console.log(`${username} : directory structure recieved ${directoryStructure}`);
-        //console.log(`${username} : files received ${directoryStructure}`);
 
         //we can save time here by assigning the id's at the client code itself during the generation of the directory structure
         //await assignIDRecursive(directoryStructure);
@@ -61,7 +90,6 @@ async function handleUpload(req, res) {
             //solution : 1)make all file names unique on client side
             //           2)no other feasable solution
             const fileEntry = await findRecordByField(directoryStructure, "name", file.originalname);
-            //console.log("file entry ",fileEntry);
             if (fileEntry && fileEntry.type == "file") {
                 fileEntry.links = [];
                 const discordService = new DiscordServices(process.env.DSPACE_TOKEN, configuration.discord, client, channelObjects);
@@ -80,36 +108,36 @@ async function handleUpload(req, res) {
         performance.end();
 
         res.status(200).json({
-            message: "Files uploaded successfully",
+            message: "Resource uploaded successfully",
             success:true,
             uploadTime:performance.elapsed(),
             userDirectory:userDirectory
         });
     } catch (error) {
-        console.error("Error uploading file:", error);
+        logger.error("Error uploading file", error);
         res.status(500).json({ 
-            message: "Internal server error" ,
+            message: "Could not upload resource" ,
             success:false,
-            error:error.message
         });
     }
 }
 
 async function handleRetrieval(req, res) {
     try {
-        logger.log(`${username} : starting retrieval sequence`);
-
         const performance = new Performance();
         performance.start();
         
         const { identifier } = req.params;
         if (!identifier) throw new Error("Identifier missing");
-        console.log(identifier);
+
+        logger.log("Starting retrieval sequence",{
+            user : username,
+            resource : identifier
+        });
 
         const userDirectory = await getUserVirtualDirectory(username);
         const record = await findRecordByField(userDirectory, "id", identifier);
         if (!record) throw new Error("Record not found");
-        console.log(record);
 
         const discordService = new DiscordServices(process.env.DSPACE_TOKEN, configuration.discord, client, channelObjects);
 
@@ -126,25 +154,30 @@ async function handleRetrieval(req, res) {
                 const currentPath = basePath ? `${basePath}/${record.name}` : record.name;
             
                 if (record.type === "file") {
-                    const retrievedFile = await discordService.retrieveFile(record.links);
-                    files.push({
-                        name: record.name,
-                        buffer: retrievedFile.buffer,
-                        path: currentPath 
-                    });
-                } else if (record.type === "directory" && record.children) {
+                    const retrievedFilePromise = discordService.retrieveFile(record.links)
+                        .then(retrievedFile => {
+                            files.push({
+                                name: record.name,
+                                buffer: retrievedFile.buffer,
+                                path: currentPath
+                            });
+                        });
+                    return retrievedFilePromise;
+                }else if (record.type === "directory" && record.children) {
                     const retrievalPromises = record.children.map(child =>
-                        createFilesArray(child, discordService, currentPath, files) 
+                        createFilesArray(child, discordService, currentPath, files)
                     );
-            
                     await Promise.all(retrievalPromises);
+                }else{
+                    throw new Error("Record type is neither a file nor a folder");
                 }
-                
+            
                 return files;
             }
             
-            async function createAndSendZip(res, files, zipFileName, performance) {
-                const archive = archiver('zip', { zlib: { level: 9 } });
+            
+            async function createAndSendZip(res, files, zipFileName) {
+                const archive = archiver('zip', { zlib: { level: 6 } });
             
                 res.setHeader('Content-Type', 'application/zip');
                 res.setHeader('Content-Disposition', `attachment; filename="${zipFileName}.zip"`);
@@ -152,9 +185,8 @@ async function handleRetrieval(req, res) {
             
                 archive.pipe(res);
             
-                archive.on('error', (err) => {
-                    console.error('Archiver error:', err);
-                    res.status(500).send('Internal server error');
+                archive.on('error', (error) => {
+                    throw new Error("Archiver error",error);
                 });
             
                 for (const file of files) {
@@ -162,23 +194,22 @@ async function handleRetrieval(req, res) {
                 }
             
                 await archive.finalize();
-
-                logger.log("retrieval time",performance.elapsed());
             }
 
             const retrievedFilesArray = await createFilesArray(record, discordService);
 
-            performance.end();
-
             await createAndSendZip(res, retrievedFilesArray, record.name, performance);
+
+            performance.end();
+            logger.log("Retrieval time",performance.elapsed());
         } else {
-            throw new Error("Invalid record type. Allowed types are 'file' or 'folder'.");
+            throw new Error("Record type is neither a file nor a folder");
         }
 
     } catch (error) {
         logger.error("Error in handleRetrieval()", error);
         return res.status(500).json({
-            message: "Could not retrieve file",
+            message: "Could not retrieve resource",
             success: false,
             error: error.message
         });
@@ -217,7 +248,7 @@ async function handleDelete(req, res) {
             });
         }
 
-        await setUserVirtualDirectory(username, userDirectory);
+        setUserVirtualDirectory(username, userDirectory);
         logger.log("Resource deleted successfully");
 
         res.status(200).json({
@@ -229,7 +260,7 @@ async function handleDelete(req, res) {
     } catch (error) {
         logger.error("Error in handleDelete()", error);
         res.status(500).json({
-            message: "Internal server error",
+            message: "Could not delete resource",
             success: false,
             error: error.message
         });
@@ -238,10 +269,9 @@ async function handleDelete(req, res) {
 
 async function handleGetUserDirectory(req, res) {
     try {
-        const { identifier } = req.params;
-        logger.log(`${username} fetching virtual directory for ${identifier}`);
+        logger.log("Fetching virtual directory",username);
 
-        const userDirectory = await getUserVirtualDirectory(identifier);
+        const userDirectory = await getUserVirtualDirectory(username);
 
         if (!userDirectory) {
             return res.status(404).json({
@@ -258,7 +288,7 @@ async function handleGetUserDirectory(req, res) {
     } catch (error) {
         logger.error(`Error fetching user directory for ${identifier}`, error);
         res.status(500).json({
-            message: "Internal server error",
+            message: "Could not fetch user directory",
             success: false,
             error: error.message
         });
