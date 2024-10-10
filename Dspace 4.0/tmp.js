@@ -1,11 +1,20 @@
-// import path from "path";
-import {getUserVirtualDirectory, setUserVirtualDirectory, searchRecordInVirtualDirectory, createUser} from "./models/virtualDirectoryServices.js";
+function formatPath(path) {
+    // Remove leading and trailing slashes (both forward and backward)
+    path = path.replace(/^\/+|\\+$/g, '');
 
-/*
-let p = "root/\\aalu/\\gobi/\\tamatar////kabutar.txt\\";
+    // Remove consecutive slashes (both forward and backward)
+    path = path.replace(/\/+/g, '/').replace(/\\+/g, '\\');
 
-console.log(path.basename(p));
-console.log(path.dirname(p));
-*/
+    // Replace every remaining single forward or backward slash with "\\"
+    path = path.replace(/\/|\\/g, '\\\\');
 
-createUser("testuser","testuser@gmail.com","testuser");
+    // Remove any leading or trailing double backslashes
+    path = path.replace(/^\\\\+|\\\\+$/g, '');
+
+    return path;
+}
+
+// Example usage
+const path1 = "\\\\example\path\\to\\\file\\\\aalu";
+
+console.log(JSON.stringify(formatPath(path1)));

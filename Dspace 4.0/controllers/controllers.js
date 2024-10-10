@@ -100,9 +100,11 @@ async function handleUpload(req, res) {
         await Promise.all(uploadPromises);
 
         const userDirectory = await getUserVirtualDirectory(username);
-        //console.log(`${username} : user directory ${userDirectory}`);
 
+        console.log("aalu");
         await insertRecordRecursivelyBasedOnFilePath(directoryStructure, userDirectory);
+        console.log("gobi");
+
         await setUserVirtualDirectory(username, userDirectory);
 
         performance.end();

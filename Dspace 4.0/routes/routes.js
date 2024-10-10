@@ -9,6 +9,6 @@ router.get("/", handleRoot);
 router.post("/upload", upload.array("files"), handleUpload);
 router.get("/retrieve/:identifier", handleRetrieval);
 router.delete("/delete/:identifier", handleDelete);
-router.get("/directory/:identifier", handleGetUserDirectory);
+router.get("/directory", handleGetUserDirectory);
 
 export default router;
