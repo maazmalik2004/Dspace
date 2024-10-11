@@ -78,18 +78,32 @@ async function handleUpload(req, res) {
         const performance = new Performance();
         performance.start();
 
-        const directoryStructure = JSON.parse(req.body.directoryStructure); 
+        const directoryStructure = JSON.parse(req.body.directoryStructure);
+        if(!directoryStructure){
+            throw new Error("Directory structure not provided");
+        }
         //will be an array of multer objects
         const files = req.files;
+        if(!files){
+            throw new Error("Files not provided");
+        }if(!Array.isArray(files)){
+            throw new Error("Files must be an array");
+        }
 
-        //we can save time here by assigning the id's at the client code itself during the generation of the directory structure
         //await assignIDRecursive(directoryStructure);
 
+        const userDirectory = await getUserVirtualDirectory(username);
+        if(!userDirectory){
+            throw new Error("User directory not found");
+        }
+
         const uploadPromises = files.map(async (file) => {
-            //inconsistency : if two file names are same at the same file path, findRecordByField() will return the first found record
-            //solution : 1)make all file names unique on client side
-            //           2)no other feasable solution
+            //is not needed when sending each file individually
             const fileEntry = await findRecordByField(directoryStructure, "name", file.originalname);
+            if(!fileEntry){
+                throw new Error("File name does not match the name mentioned in its directory structure");
+            }
+            
             if (fileEntry && fileEntry.type == "file") {
                 fileEntry.links = [];
                 const discordService = new DiscordServices(process.env.DSPACE_TOKEN, configuration.discord, client, channelObjects);
@@ -99,11 +113,7 @@ async function handleUpload(req, res) {
 
         await Promise.all(uploadPromises);
 
-        const userDirectory = await getUserVirtualDirectory(username);
-
-        console.log("aalu");
         await insertRecordRecursivelyBasedOnFilePath(directoryStructure, userDirectory);
-        console.log("gobi");
 
         await setUserVirtualDirectory(username, userDirectory);
 
@@ -138,12 +148,14 @@ async function handleRetrieval(req, res) {
         });
 
         const userDirectory = await getUserVirtualDirectory(username);
+        if(!userDirectory) throw new Error("User not found");
+        
         const record = await findRecordByField(userDirectory, "id", identifier);
         if (!record) throw new Error("Record not found");
 
         const discordService = new DiscordServices(process.env.DSPACE_TOKEN, configuration.discord, client, channelObjects);
 
-        if (record.type == "file") {
+        if (record.type == "file" && record.links && record.links.length!=0) {
             const retrievedFile = await discordService.retrieveFile(record.links);
             const mimeType = mime.getType(retrievedFile.extension);
             res.setHeader('Content-Disposition', `attachment; filename="${record.name}.${retrievedFile.extension}"`);
@@ -151,11 +163,10 @@ async function handleRetrieval(req, res) {
             res.send(retrievedFile.buffer);
         
         } else if (record.type == "directory") {
-            //nested helper functions
             async function createFilesArray(record, discordService, basePath = '', files = []) {
                 const currentPath = basePath ? `${basePath}/${record.name}` : record.name;
             
-                if (record.type === "file") {
+                if (record.type == "file" && record.links && record.links.length!=0) {
                     const retrievedFilePromise = discordService.retrieveFile(record.links)
                         .then(retrievedFile => {
                             files.push({
@@ -165,13 +176,11 @@ async function handleRetrieval(req, res) {
                             });
                         });
                     return retrievedFilePromise;
-                }else if (record.type === "directory" && record.children) {
+                }else if (record.type === "directory" && record.children && record.children.length!=0) {
                     const retrievalPromises = record.children.map(child =>
                         createFilesArray(child, discordService, currentPath, files)
                     );
                     await Promise.all(retrievalPromises);
-                }else{
-                    throw new Error("Record type is neither a file nor a folder");
                 }
             
                 return files;
@@ -204,8 +213,6 @@ async function handleRetrieval(req, res) {
 
             performance.end();
             logger.log("Retrieval time",performance.elapsed());
-        } else {
-            throw new Error("Record type is neither a file nor a folder");
         }
 
     } catch (error) {
@@ -222,7 +229,11 @@ async function handleDelete(req, res) {
     try {
         const { identifier } = req.params;
         logger.log(`${username} deleting ${identifier}`);
+
         const userDirectory = await getUserVirtualDirectory(username);
+        if(!userDirectory){
+            throw new Error("User not found");
+        }
 
         function deleteById(id, virtualDirectory) {
             if (virtualDirectory.children) {
@@ -245,12 +256,13 @@ async function handleDelete(req, res) {
 
         if (!isDeleted) {
             return res.status(200).json({
-                message: "Record not found, but deletion is considered successful",
+                message: "Record not found, but deletion can be considered successful",
                 success: true
             });
         }
 
-        setUserVirtualDirectory(username, userDirectory);
+        await setUserVirtualDirectory(username, userDirectory);
+        
         logger.log("Resource deleted successfully");
 
         res.status(200).json({

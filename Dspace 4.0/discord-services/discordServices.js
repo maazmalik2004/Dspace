@@ -52,7 +52,8 @@ class DiscordServices {
 
     async uploadFile(file) {
         try {
-            logger.log("Beginning file upload for", file.originalname);
+            logger.log("Uploading file", file.originalname);
+            
             const chunkSize = this.config.chunkSize * 1024 * 1024;
             const numberOfChunks = Math.ceil(file.buffer.length / chunkSize);
             const extension = path.extname(file.originalname);
@@ -74,10 +75,10 @@ class DiscordServices {
                 })
             );
 
-            logger.log("Finished file upload for", file.originalname);
+            logger.log("upload complete", file.originalname);
             return uploadPromises;
         } catch (error) {
-            logger.error("Unexpected error during file upload:", error);
+            logger.error("Unexpected error during file upload", error);
         }
     }
 
@@ -117,7 +118,7 @@ class DiscordServices {
                 buffer: cumulativeBuffer
             };
         } catch (error) {
-            logger.error("Error during file retrieval:", error);
+            logger.error("Error during file retrieval", error);
             throw new Error('Failed to retrieve file chunks');
         }
     }
@@ -128,7 +129,7 @@ class DiscordServices {
         const match = link.match(regex);
 
         if (!match) {
-            logger.warn('Invalid Discord link:', link);
+            logger.warn('Invalid Discord link', link);
             throw new Error('Invalid Discord link');
         }
 
