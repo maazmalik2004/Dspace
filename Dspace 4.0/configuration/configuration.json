@@ -22,6 +22,6 @@
         "maxChunkSizeAllowed": 24
     },
     "mongodb":{
-        "url":"mongodb://localhost:27017/dspace"
+        "url":"mongodb+srv://maazmalik2004:abenzene1234@dspace.odk45.mongodb.net/"
     }
 }
